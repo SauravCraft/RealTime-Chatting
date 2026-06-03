@@ -1,6 +1,4 @@
-# Local Netlify folder
-.netlify
 node_modules/
 .env
 .netlify/
-uploads/
+public/uploads/
