@@ -30,14 +30,22 @@ exports.handler = async (event, context) => {
     const client = new Ably.Rest(apiKey);
     const clientId = event.queryStringParameters?.clientId || 'anonymous';
 
-    const tokenRequest = await client.auth.createTokenRequest({
+    const tokenRequest = await new Promise((resolve, reject) => {
+  client.auth.createTokenRequest(
+    {
       clientId,
       capability: {
-        'keychat:public':    ['publish', 'subscribe', 'presence'],
-        'keychat:rooms:*':   ['publish', 'subscribe', 'presence'],
-        'keychat:control':   ['publish', 'subscribe']
+        'keychat:public': ['publish', 'subscribe', 'presence'],
+        'keychat:rooms:*': ['publish', 'subscribe', 'presence'],
+        'keychat:control': ['publish', 'subscribe']
       }
-    });
+    },
+    (err, tokenRequest) => {
+      if (err) reject(err);
+      else resolve(tokenRequest);
+    }
+  );
+});
 
     return {
       statusCode: 200,
