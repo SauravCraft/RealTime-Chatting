@@ -37,7 +37,12 @@ exports.handler = async (event, context) => {
       capability: {
         'keychat:public': ['publish', 'subscribe', 'presence'],
         'keychat:rooms:*': ['publish', 'subscribe', 'presence'],
-        'keychat:control': ['publish', 'subscribe']
+        'keychat:control': [
+  'publish',
+  'subscribe',
+  'presence',
+  'history'
+]
       }
     },
     (err, tokenRequest) => {

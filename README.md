@@ -122,7 +122,7 @@ keychat-netlify/
 
 - **Ably API key is never exposed to the frontend** — only the serverless function holds it
 - The frontend gets short-lived **auth tokens** from `/api/ably-auth`
-- Room keys validated server-side via `/api/rooms`
+- Room keys validated server-side via `/.netlify/functions/rooms`
 - XSS protection via HTML escaping
 - File size limit (5MB)
 
