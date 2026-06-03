@@ -66,9 +66,13 @@ exports.handler = async (event, context) => {
 
       const controlChannel = client.channels.get('keychat:control');
       const history = await controlChannel.history({ limit: 200 });
-      
+
+      console.log("History response:", history);
+
+      const items = history && history.items ? history.items : [];
+
       let roomData = null;
-      for (const msg of history.items) {
+      for (const msg of items) {
         if (msg.name === 'room:created' && msg.data.id === roomId) {
           roomData = msg.data;
           break;
