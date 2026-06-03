@@ -1,0 +1,2171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KeyChat — Anonymous Real-Time Messaging</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- Ably Realtime SDK (replaces Socket.IO) -->
+<script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0A0E1A;
+  --bg2:      #0F1624;
+  --bg3:      #141A2E;
+  --card:     #1A2235;
+  --card2:    #1E2940;
+  --border:   #ffffff0f;
+  --border2:  #ffffff18;
+  --primary:  #5865F2;
+  --primary-h:#6C79FF;
+  --accent:   #22C55E;
+  --pink:     #EC4899;
+  --yellow:   #EAB308;
+  --text:     #F1F5F9;
+  --text2:    #94A3B8;
+  --text3:    #64748B;
+  --danger:   #EF4444;
+  --sidebar-w: 280px;
+  --hdr: 60px;
+  --radius: 12px;
+}
+
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: 'Syne', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── CONNECTION OVERLAY ── */
+#connect-overlay {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 24px;
+}
+.connect-logo {
+  display: flex; align-items: center; gap: 16px;
+}
+.connect-logo-icon {
+  width: 64px; height: 64px;
+  background: linear-gradient(135deg, var(--primary), #8B5CF6);
+  border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 32px;
+  box-shadow: 0 0 60px #5865F250;
+  animation: pulse-glow 2s infinite;
+}
+@keyframes pulse-glow {
+  0%,100% { box-shadow: 0 0 30px #5865F250; }
+  50% { box-shadow: 0 0 80px #5865F280; }
+}
+.connect-logo-text { font-size: 36px; font-weight: 800; letter-spacing: -1px; }
+.connect-logo-text span { color: var(--primary); }
+.connect-status {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px; color: var(--text3);
+}
+.connect-spinner {
+  width: 20px; height: 20px;
+  border: 2px solid var(--border2);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── SETUP OVERLAY (username) ── */
+#setup-overlay {
+  position: fixed; inset: 0;
+  background: #00000090;
+  z-index: 9998;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+#setup-overlay.show { display: flex; }
+.setup-card {
+  background: var(--card);
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  padding: 40px;
+  width: min(440px, 95vw);
+  box-shadow: 0 40px 120px #00000080;
+  text-align: center;
+  animation: modal-in .3s ease;
+}
+.setup-icon {
+  font-size: 48px; margin-bottom: 16px;
+  animation: bounce .6s ease infinite alternate;
+}
+@keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-8px); } }
+.setup-title { font-size: 26px; font-weight: 800; margin-bottom: 8px; letter-spacing: -.5px; }
+.setup-sub { font-size: 14px; color: var(--text2); margin-bottom: 28px; line-height: 1.6; }
+.setup-input-group { margin-bottom: 16px; text-align: left; }
+.setup-label { font-size: 12px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; display: block; }
+.setup-input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 12px 16px;
+  color: var(--text);
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .2s;
+}
+.setup-input:focus { border-color: var(--primary); }
+.setup-suggestion {
+  font-size: 12px; color: var(--text3); margin-top: 6px; cursor: pointer;
+  transition: color .15s;
+}
+.setup-suggestion:hover { color: var(--primary); }
+.setup-suggestion span { color: var(--accent); font-weight: 600; }
+.setup-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, var(--primary), #8B5CF6);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all .2s;
+  margin-top: 8px;
+}
+.setup-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 30px #5865F250; }
+
+/* ── Sidebar ── */
+#sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform .3s ease;
+  z-index: 10;
+}
+
+.sidebar-logo {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.logo-icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--primary), #8B5CF6);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  box-shadow: 0 0 20px #5865F240;
+}
+.logo-text { font-weight: 800; font-size: 18px; letter-spacing: -.5px; }
+.logo-text span { color: var(--primary); }
+
+/* Connection badge */
+.conn-badge {
+  margin-left: auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  transition: background .3s;
+}
+.conn-badge.offline { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.conn-badge.connecting { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); animation: blink 1s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.sidebar-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+.sidebar-scroll::-webkit-scrollbar { width: 4px; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+.sidebar-section { padding: 16px 16px 8px; }
+.sidebar-section-label {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text3); margin-bottom: 6px;
+}
+
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px;
+  cursor: pointer; font-size: 14px; font-weight: 500;
+  color: var(--text2); transition: all .15s;
+  position: relative; margin: 1px 0; user-select: none;
+}
+.nav-item:hover { background: var(--card); color: var(--text); }
+.nav-item.active {
+  background: linear-gradient(135deg, #5865F220, #5865F210);
+  color: var(--text); border: 1px solid #5865F230;
+}
+.nav-item.active::before {
+  content: ''; position: absolute; left: 0; top: 50%;
+  transform: translateY(-50%); width: 3px; height: 60%;
+  background: var(--primary); border-radius: 0 3px 3px 0;
+}
+.nav-item .ni-icon {
+  width: 28px; height: 28px; display: flex;
+  align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;
+}
+.nav-item .badge {
+  margin-left: auto; background: var(--primary);
+  color: #fff; font-size: 10px; font-weight: 700;
+  padding: 2px 6px; border-radius: 10px; min-width: 18px; text-align: center;
+}
+.nav-item.room-item .badge { background: var(--card2); color: var(--text3); }
+
+.sidebar-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; border-radius: 8px;
+  cursor: pointer; font-size: 13px; font-weight: 600;
+  transition: all .15s; border: 1px dashed var(--border2);
+  color: var(--text3); margin: 2px 0;
+}
+.sidebar-btn:hover { border-color: var(--primary); color: var(--primary); background: #5865F210; }
+
+.user-pill {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 8px; font-size: 13px;
+  color: var(--text2); margin: 1px 0;
+}
+.user-pill .upill-avatar {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+.online-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 6px var(--accent); margin-left: auto;
+}
+
+.sidebar-user {
+  padding: 14px 16px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+.my-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700; flex-shrink: 0; cursor: pointer;
+}
+.my-username {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.my-username:hover { color: var(--primary); }
+.edit-name-btn {
+  background: none; border: none; color: var(--text3);
+  cursor: pointer; font-size: 14px; padding: 4px; border-radius: 4px; transition: color .15s;
+}
+.edit-name-btn:hover { color: var(--text); }
+
+/* ── Main ── */
+#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+
+#chat-header {
+  height: var(--hdr); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 20px; gap: 14px;
+  background: var(--bg2); flex-shrink: 0;
+}
+.ch-icon { font-size: 20px; }
+.ch-info { flex: 1; min-width: 0; }
+.ch-name { font-size: 16px; font-weight: 700; letter-spacing: -.3px; }
+.ch-desc { font-size: 12px; color: var(--text3); margin-top: 1px; }
+.ch-actions { display: flex; gap: 8px; }
+.icon-btn {
+  width: 34px; height: 34px; border-radius: 8px; border: none;
+  background: var(--card); color: var(--text2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; transition: all .15s;
+}
+.icon-btn:hover { background: var(--card2); color: var(--text); }
+
+#search-bar {
+  display: none; padding: 10px 20px;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+}
+#search-bar.show { display: flex; gap: 10px; }
+#search-input {
+  flex: 1; background: var(--card); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 8px 14px; color: var(--text);
+  font-size: 14px; font-family: inherit; outline: none;
+}
+#search-input:focus { border-color: var(--primary); }
+
+#messages-area {
+  flex: 1; overflow-y: auto; padding: 20px;
+  display: flex; flex-direction: column; gap: 2px; scroll-behavior: smooth;
+}
+#messages-area::-webkit-scrollbar { width: 5px; }
+#messages-area::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+#typing-bar {
+  height: 24px; padding: 0 20px; font-size: 12px; color: var(--text3);
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+}
+.typing-dots { display: flex; gap: 3px; }
+.typing-dots span {
+  width: 5px; height: 5px; background: var(--text3);
+  border-radius: 50%; animation: tdot .8s infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: .2s; }
+.typing-dots span:nth-child(3) { animation-delay: .4s; }
+@keyframes tdot { 0%,80%,100%{transform:scale(.8);opacity:.4} 40%{transform:scale(1.2);opacity:1} }
+
+#input-area {
+  padding: 10px 20px 14px; border-top: 1px solid var(--border);
+  background: var(--bg2); flex-shrink: 0;
+}
+.reply-preview {
+  display: none; background: var(--card);
+  border-left: 3px solid var(--primary); border-radius: 0 6px 6px 0;
+  padding: 6px 10px; margin-bottom: 8px; font-size: 12px;
+  color: var(--text2); align-items: center; gap: 8px;
+}
+.reply-preview.show { display: flex; }
+.reply-preview .close { margin-left: auto; cursor: pointer; color: var(--text3); }
+
+.input-wrapper {
+  display: flex; align-items: flex-end; gap: 10px;
+  background: var(--card); border: 1px solid var(--border2);
+  border-radius: 12px; padding: 8px 10px; transition: border-color .2s;
+}
+.input-wrapper:focus-within { border-color: #5865F250; }
+.input-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.input-action {
+  width: 32px; height: 32px; border-radius: 8px; border: none;
+  background: none; color: var(--text3); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; transition: all .15s;
+}
+.input-action:hover { color: var(--primary); background: #5865F215; }
+#msg-input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text); font-size: 14px; font-family: inherit;
+  resize: none; max-height: 120px; line-height: 1.5; padding: 4px 0;
+}
+#msg-input::placeholder { color: var(--text3); }
+.send-btn {
+  width: 36px; height: 36px; border-radius: 10px; border: none;
+  background: var(--primary); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; transition: all .15s; flex-shrink: 0;
+}
+.send-btn:hover { background: var(--primary-h); transform: scale(1.05); }
+
+/* ── Messages ── */
+.msg-group {
+  display: flex; gap: 10px; padding: 4px 8px;
+  border-radius: 10px; position: relative; margin-bottom: 2px;
+  animation: msg-appear .2s ease;
+}
+@keyframes msg-appear { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+.msg-group:hover { background: #ffffff04; }
+.msg-group:hover .msg-actions { opacity: 1; }
+.msg-group.me .msg-body { align-items: flex-end; }
+
+.msg-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 700; flex-shrink: 0; margin-top: 2px;
+}
+.msg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.msg-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+.msg-username { font-size: 13px; font-weight: 700; }
+.msg-ts { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+.msg-edited { font-size: 10px; color: var(--text3); font-style: italic; }
+
+.msg-bubble {
+  display: inline-block; max-width: 100%;
+  padding: 8px 12px; border-radius: 0 10px 10px 10px;
+  background: var(--card); font-size: 14px; line-height: 1.5;
+  color: var(--text); word-break: break-word; white-space: pre-wrap;
+}
+.msg-group.me .msg-bubble {
+  background: linear-gradient(135deg, #5865F2, #6C79FF);
+  border-radius: 10px 0 10px 10px;
+}
+
+.sys-msg {
+  text-align: center; padding: 6px 0; font-size: 12px;
+  color: var(--text3); display: flex; align-items: center; gap: 8px;
+}
+.sys-msg::before, .sys-msg::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+.reply-ref {
+  background: var(--bg3); border-left: 3px solid var(--primary);
+  border-radius: 0 6px 6px 0; padding: 4px 8px; margin-bottom: 4px;
+  font-size: 12px; color: var(--text2); cursor: pointer;
+  display: inline-flex; flex-direction: column; gap: 2px;
+}
+.reply-ref-user { font-weight: 700; color: var(--primary); font-size: 11px; }
+
+.msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.reaction-pill {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--card2); border: 1px solid var(--border2);
+  border-radius: 20px; padding: 2px 8px; font-size: 13px;
+  cursor: pointer; transition: all .15s; user-select: none;
+}
+.reaction-pill:hover { border-color: var(--primary); background: #5865F215; }
+.reaction-pill.mine { border-color: var(--primary); background: #5865F220; }
+.reaction-count { font-size: 11px; color: var(--text2); font-family: 'JetBrains Mono', monospace; }
+
+.msg-actions {
+  position: absolute; right: 12px; top: -14px;
+  display: flex; gap: 2px; background: var(--card2);
+  border: 1px solid var(--border2); border-radius: 10px;
+  padding: 3px; opacity: 0; transition: opacity .15s; z-index: 5;
+}
+.ma-btn {
+  width: 28px; height: 28px; border-radius: 7px; border: none;
+  background: none; color: var(--text2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; transition: all .1s;
+}
+.ma-btn:hover { background: var(--card); color: var(--text); }
+
+.file-preview { max-width: 280px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border2); margin-top: 4px; }
+.file-preview img, .file-preview video { max-width: 100%; display: block; }
+.file-doc {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; background: var(--card); border-radius: 10px;
+  margin-top: 4px; cursor: pointer; transition: background .15s;
+  text-decoration: none; color: inherit;
+}
+.file-doc:hover { background: var(--card2); }
+.file-doc-icon { font-size: 22px; }
+.file-doc-info { flex: 1; min-width: 0; }
+.file-doc-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-doc-size { font-size: 11px; color: var(--text3); }
+
+.msg-pinned-badge { font-size: 10px; color: var(--yellow); display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+
+/* ── Emoji Picker ── */
+#emoji-picker {
+  position: absolute; bottom: 90px; left: calc(var(--sidebar-w) + 10px);
+  background: var(--card2); border: 1px solid var(--border2);
+  border-radius: 12px; padding: 12px; display: none; z-index: 100;
+  box-shadow: 0 20px 60px #00000060; width: 300px;
+}
+#emoji-picker.show { display: block; }
+.ep-categories { display: flex; gap: 4px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 4px; }
+.ep-cat-btn {
+  border: none; background: none; font-size: 18px;
+  cursor: pointer; padding: 4px 8px; border-radius: 8px; transition: background .15s;
+}
+.ep-cat-btn:hover, .ep-cat-btn.active { background: var(--card); }
+.ep-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; max-height: 160px; overflow-y: auto; }
+.ep-emoji {
+  font-size: 20px; cursor: pointer; padding: 4px;
+  border-radius: 6px; text-align: center; transition: transform .1s, background .1s;
+}
+.ep-emoji:hover { background: var(--card); transform: scale(1.2); }
+
+/* ── Modals ── */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: #00000080; z-index: 200;
+  align-items: center; justify-content: center; backdrop-filter: blur(4px);
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--card); border: 1px solid var(--border2);
+  border-radius: 16px; padding: 28px; width: min(420px, 95vw);
+  box-shadow: 0 40px 100px #00000080; animation: modal-in .2s ease;
+}
+@keyframes modal-in { from{opacity:0;transform:scale(.92) translateY(20px)} to{opacity:1;transform:scale(1) translateY(0)} }
+.modal-title { font-size: 20px; font-weight: 800; margin-bottom: 6px; letter-spacing: -.4px; }
+.modal-subtitle { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+.modal-field { margin-bottom: 14px; }
+.modal-label { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 6px; display: block; }
+.modal-input {
+  width: 100%; background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 10px 14px; color: var(--text);
+  font-size: 14px; font-family: inherit; outline: none; transition: border-color .2s;
+}
+.modal-input:focus { border-color: var(--primary); }
+.modal-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+.btn { padding: 9px 18px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; transition: all .15s; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-h); }
+.btn-ghost { background: var(--bg3); color: var(--text2); }
+.btn-ghost:hover { background: var(--card2); color: var(--text); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { background: #DC2626; }
+
+.key-display { background: var(--bg3); border: 1px solid var(--border2); border-radius: 10px; padding: 14px; margin: 14px 0; }
+.key-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.key-row:last-child { margin-bottom: 0; }
+.key-label { font-size: 12px; color: var(--text3); font-weight: 600; }
+.key-value {
+  font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
+  color: var(--accent); background: #22C55E15; padding: 4px 10px;
+  border-radius: 6px; cursor: pointer; border: 1px solid #22C55E30;
+  transition: all .15s; user-select: all;
+}
+.key-value:hover { border-color: var(--accent); }
+
+/* Members panel */
+#members-panel {
+  width: 220px; min-width: 220px; background: var(--bg2);
+  border-left: 1px solid var(--border); display: none; flex-direction: column; overflow: hidden;
+}
+#members-panel.show { display: flex; }
+.mp-header { padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--text3); }
+.mp-list { flex: 1; overflow-y: auto; padding: 10px 8px; }
+.mp-member { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; transition: background .15s; }
+.mp-member:hover { background: var(--card); }
+.mp-avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.mp-name { font-size: 13px; color: var(--text2); }
+.mp-owner-badge { margin-left: auto; font-size: 10px; background: #EAB30820; color: var(--yellow); padding: 1px 5px; border-radius: 4px; }
+
+/* Toast */
+#toast-container { position: fixed; top: 20px; right: 20px; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--card2); border: 1px solid var(--border2); border-radius: 10px;
+  padding: 12px 16px; font-size: 13px; max-width: 280px;
+  box-shadow: 0 8px 30px #00000060; animation: toast-in .3s ease;
+  display: flex; align-items: center; gap: 10px;
+}
+.toast.success { border-color: #22C55E40; }
+.toast.error { border-color: #EF444440; }
+.toast.info { border-color: #5865F240; }
+@keyframes toast-in { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
+
+/* Upload progress */
+.upload-progress { background: var(--bg3); border-radius: 8px; overflow: hidden; height: 4px; margin-top: 6px; }
+.upload-progress-bar { height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width .3s ease; border-radius: 8px; }
+
+/* Room owner controls */
+.owner-section { background: var(--bg3); border-radius: 10px; padding: 14px; margin-top: 10px; border: 1px solid var(--border); }
+.owner-section-title { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+.owner-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border-radius: 8px; border: none; background: none;
+  color: var(--text2); font-size: 13px; font-family: inherit;
+  cursor: pointer; transition: all .15s; margin-bottom: 4px; text-align: left;
+}
+.owner-btn:hover { background: var(--card2); color: var(--text); }
+.owner-btn.danger:hover { background: #EF444420; color: var(--danger); }
+
+/* Empty state */
+.empty-state {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; color: var(--text3); text-align: center; padding: 40px;
+}
+.empty-state .es-icon { font-size: 48px; margin-bottom: 4px; opacity: .5; }
+.empty-state h3 { font-size: 18px; font-weight: 700; color: var(--text2); }
+.empty-state p { font-size: 14px; max-width: 260px; line-height: 1.6; }
+
+/* Context menu */
+#ctx-menu {
+  position: fixed; background: var(--card2); border: 1px solid var(--border2);
+  border-radius: 10px; padding: 6px; z-index: 500;
+  min-width: 160px; box-shadow: 0 10px 40px #00000060; display: none;
+}
+#ctx-menu.show { display: block; }
+.ctx-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 7px; font-size: 13px; cursor: pointer; transition: background .1s; color: var(--text2); }
+.ctx-item:hover { background: var(--card); color: var(--text); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger:hover { background: #EF444420; }
+.ctx-divider { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* File paste zone */
+.paste-overlay {
+  position: fixed; inset: 0; background: #5865F220;
+  border: 3px dashed var(--primary); z-index: 8000;
+  display: none; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 800; color: var(--primary);
+  backdrop-filter: blur(4px); pointer-events: none;
+}
+.paste-overlay.show { display: flex; }
+
+/* Scrollbar */
+*::-webkit-scrollbar { width: 5px; height: 5px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+/* Mobile */
+.hamburger { display: none; width: 34px; height: 34px; border-radius: 8px; border: none; background: var(--card); color: var(--text2); cursor: pointer; align-items: center; justify-content: center; font-size: 18px; }
+@media (max-width: 700px) {
+  #sidebar { position: fixed; left: 0; top: 0; bottom: 0; transform: translateX(-100%); }
+  #sidebar.open { transform: translateX(0); box-shadow: 4px 0 30px #00000060; }
+  .hamburger { display: flex; }
+  #members-panel { display: none !important; }
+  #emoji-picker { left: 10px; width: calc(100vw - 20px); }
+}
+
+/* Netlify setup alert */
+#setup-alert {
+  display: none; padding: 10px 20px;
+  background: linear-gradient(135deg, #EAB30815, #5865F215);
+  border-bottom: 1px solid #EAB30830; font-size: 13px; color: var(--yellow);
+  align-items: center; gap: 8px;
+}
+#setup-alert.show { display: flex; }
+#setup-alert a { color: var(--accent); text-decoration: none; font-weight: 600; }
+#setup-alert a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<!-- Connection/Loading Overlay -->
+<div id="connect-overlay">
+  <div class="connect-logo">
+    <div class="connect-logo-icon">💬</div>
+    <div class="connect-logo-text">Key<span>Chat</span></div>
+  </div>
+  <div class="connect-status">
+    <div class="connect-spinner"></div>
+    <span id="connect-status-text">Connecting to KeyChat…</span>
+  </div>
+</div>
+
+<!-- Setup Overlay (first-time username) -->
+<div id="setup-overlay">
+  <div class="setup-card">
+    <div class="setup-icon">👋</div>
+    <div class="setup-title">Welcome to KeyChat</div>
+    <div class="setup-sub">No account needed. Just pick a name and start chatting with anyone, anywhere.</div>
+    <div class="setup-input-group">
+      <label class="setup-label">Your Username</label>
+      <input class="setup-input" id="setup-username" placeholder="e.g. CyberWolf847" maxlength="32">
+      <div class="setup-suggestion" id="setup-suggestion" onclick="useSuggestion()">💡 Suggestion: <span id="setup-suggest-text">CyberWolf847</span></div>
+    </div>
+    <div class="setup-input-group">
+      <label class="setup-label">Avatar Emoji</label>
+      <input class="setup-input" id="setup-avatar" placeholder="😀" maxlength="4" value="😀">
+    </div>
+    <button class="setup-btn" onclick="completeSetup()">Enter KeyChat ➤</button>
+  </div>
+</div>
+
+<!-- Paste overlay -->
+<div class="paste-overlay" id="paste-overlay">📋 Drop or paste file to send</div>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">💬</div>
+    <div class="logo-text">Key<span>Chat</span></div>
+    <div class="conn-badge connecting" id="conn-badge" title="Connecting…"></div>
+  </div>
+
+  <div class="sidebar-scroll">
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Channels</div>
+      <div class="nav-item active" id="nav-public" onclick="switchToPublic()">
+        <div class="ni-icon">#</div>
+        Public Chat
+        <div class="badge" id="public-badge" style="display:none">0</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Private Rooms</div>
+      <div id="rooms-list-sidebar"></div>
+      <div class="sidebar-btn" onclick="showModal('create-room-modal')">
+        <span>＋</span> Create Room
+      </div>
+      <div class="sidebar-btn" onclick="showModal('join-room-modal')">
+        <span>🔑</span> Join Room
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Online — <span id="online-count">0</span></div>
+      <div id="online-list-sidebar"></div>
+    </div>
+  </div>
+
+  <div class="sidebar-user">
+    <div class="my-avatar" id="my-avatar" onclick="showModal('settings-modal')">😀</div>
+    <div class="my-username" id="my-username" onclick="showModal('settings-modal')">Loading…</div>
+    <button class="edit-name-btn" onclick="showModal('settings-modal')" title="Settings">⚙️</button>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <!-- Netlify setup alert (shown if ABLY not configured) -->
+  <div id="setup-alert">
+    ⚠️ <strong>Demo Mode</strong> — To enable real-time chat, add your <a href="https://ably.com" target="_blank">Ably API key</a> to Netlify environment variables. <a href="README.md" target="_blank">See setup guide</a>.
+    <button onclick="this.parentElement.classList.remove('show')" style="margin-left:auto;background:none;border:none;color:inherit;cursor:pointer;font-size:16px;">✕</button>
+  </div>
+
+  <div id="chat-header">
+    <button class="hamburger" onclick="toggleSidebar()">☰</button>
+    <div class="ch-icon" id="ch-icon">#</div>
+    <div class="ch-info">
+      <div class="ch-name" id="ch-name">Public Chat</div>
+      <div class="ch-desc" id="ch-desc">Global chat — everyone can see messages</div>
+    </div>
+    <div class="ch-actions">
+      <button class="icon-btn" onclick="toggleSearch()" title="Search">🔍</button>
+      <button class="icon-btn" id="members-btn" onclick="toggleMembers()" title="Members" style="display:none">👥</button>
+      <button class="icon-btn" id="room-settings-btn" onclick="showRoomSettings()" title="Room Settings" style="display:none">⚙️</button>
+    </div>
+  </div>
+
+  <div id="search-bar">
+    <input id="search-input" placeholder="Search messages…" oninput="searchMessages(this.value)">
+    <button class="btn btn-ghost" onclick="toggleSearch()">✕</button>
+  </div>
+
+  <div id="messages-area">
+    <div class="empty-state" id="empty-state">
+      <div class="es-icon">💬</div>
+      <h3>Welcome to Public Chat</h3>
+      <p>This is the start of the global chat. Say hello!</p>
+    </div>
+  </div>
+
+  <div id="typing-bar"></div>
+
+  <div id="upload-progress-wrap" style="padding:0 20px;display:none">
+    <div class="upload-progress"><div class="upload-progress-bar" id="upload-progress-bar" style="width:0%"></div></div>
+  </div>
+
+  <div id="input-area">
+    <div class="reply-preview" id="reply-preview">
+      <span id="reply-preview-text">…</span>
+      <span class="close" onclick="clearReply()">✕</span>
+    </div>
+    <div class="input-wrapper">
+      <div class="input-actions">
+        <button class="input-action" onclick="triggerFileUpload()" title="Attach file">📎</button>
+        <button class="input-action" onclick="toggleEmoji()" title="Emoji">😀</button>
+      </div>
+      <textarea id="msg-input" placeholder="Message #public-chat…" rows="1"
+        oninput="autoResize(this); handleTyping()"
+        onkeydown="handleInputKey(event)"></textarea>
+      <button class="send-btn" onclick="sendMessage()">➤</button>
+    </div>
+    <input type="file" id="file-input" multiple style="display:none"
+      accept="image/*,video/mp4,video/quicktime,.pdf,.docx,.xlsx,.txt,.zip"
+      onchange="handleFileUpload(this.files)">
+  </div>
+</div>
+
+<!-- Members Panel -->
+<div id="members-panel">
+  <div class="mp-header">Members <span id="members-count">0</span></div>
+  <div class="mp-list" id="members-list"></div>
+</div>
+
+<!-- Emoji Picker -->
+<div id="emoji-picker">
+  <div class="ep-categories" id="ep-cats"></div>
+  <div class="ep-grid" id="ep-grid"></div>
+</div>
+
+<!-- Context Menu -->
+<div id="ctx-menu"></div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- ══ MODALS ══ -->
+<div class="modal-overlay" id="create-room-modal">
+  <div class="modal">
+    <div class="modal-title">Create Private Room</div>
+    <div class="modal-subtitle">A unique Room ID and Key will be generated automatically.</div>
+    <div class="modal-field">
+      <label class="modal-label">Room Name</label>
+      <input class="modal-input" id="create-room-name" placeholder="My Secret Room…">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('create-room-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createRoom()">Create Room</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="room-created-modal">
+  <div class="modal">
+    <div class="modal-title">🎉 Room Created!</div>
+    <div class="modal-subtitle">Share these credentials with people you want to invite.</div>
+    <div class="key-display">
+      <div class="key-row">
+        <span class="key-label">ROOM ID</span>
+        <span class="key-value" id="rc-room-id" onclick="copyText(this)">—</span>
+      </div>
+      <div class="key-row">
+        <span class="key-label">ROOM KEY</span>
+        <span class="key-value" id="rc-room-key" onclick="copyText(this)">—</span>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--text3)">Click any value to copy it. Keep the Room Key secret!</p>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeModal('room-created-modal')">Enter Room</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="join-room-modal">
+  <div class="modal">
+    <div class="modal-title">Join Private Room</div>
+    <div class="modal-subtitle">Enter the Room ID and Room Key to join.</div>
+    <div class="modal-field">
+      <label class="modal-label">Room ID</label>
+      <input class="modal-input" id="join-room-id" placeholder="e.g. a8h29f">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Room Key</label>
+      <input class="modal-input" id="join-room-key" placeholder="e.g. KEY-9481-ABCD">
+    </div>
+    <div id="join-error" style="color:var(--danger);font-size:13px;margin-top:4px;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('join-room-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="joinRoom()">Join Room</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal">
+    <div class="modal-title">⚙️ Settings</div>
+    <div class="modal-subtitle">Customize your chat identity.</div>
+    <div class="modal-field">
+      <label class="modal-label">Username</label>
+      <input class="modal-input" id="settings-username" placeholder="Your username…">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Avatar Emoji</label>
+      <input class="modal-input" id="settings-avatar" placeholder="e.g. 🐺" maxlength="4">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('settings-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="room-settings-modal">
+  <div class="modal">
+    <div class="modal-title">Room Settings</div>
+    <div class="modal-subtitle" id="rs-room-name-label">—</div>
+    <div class="modal-field">
+      <label class="modal-label">Room Name</label>
+      <input class="modal-input" id="rs-room-name">
+    </div>
+    <div class="key-display" id="rs-key-display" style="display:none">
+      <div class="key-row">
+        <span class="key-label">ROOM ID</span>
+        <span class="key-value" id="rs-room-id" onclick="copyText(this)">—</span>
+      </div>
+      <div class="key-row">
+        <span class="key-label">ROOM KEY</span>
+        <span class="key-value" id="rs-room-key" onclick="copyText(this)">—</span>
+      </div>
+    </div>
+    <div class="owner-section" id="rs-owner-section" style="display:none">
+      <div class="owner-section-title">Owner Controls</div>
+      <button class="owner-btn" onclick="regenKey()">🔄 Regenerate Room Key</button>
+      <button class="owner-btn" id="rs-lock-btn" onclick="toggleLock()">🔒 Lock Room</button>
+      <button class="owner-btn danger" onclick="deleteRoom()">🗑️ Delete Room</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('room-settings-modal')">Cancel</button>
+      <button class="btn btn-primary" id="rs-save-btn" onclick="saveRoomSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="edit-msg-modal">
+  <div class="modal">
+    <div class="modal-title">Edit Message</div>
+    <textarea class="modal-input" id="edit-msg-text" rows="4" style="resize:vertical"></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('edit-msg-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditMessage()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+//  KeyChat — Netlify Edition
+//  Real-time: Ably (replaces Socket.IO — works on any static host)
+//  File uploads: base64 embedded in messages (no server storage needed)
+//  Room keys: validated via Netlify Functions
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Config ──────────────────────────────────────────────────────────────
+// IMPORTANT: Set ABLY_API_KEY in Netlify environment variables
+// The frontend gets an auth token from the serverless function
+const ABLY_AUTH_URL = '/api/ably-auth';
+const ROOMS_API_URL = '/api/rooms';
+
+// ── Emoji Data ──────────────────────────────────────────────────────────
+const EMOJI_CATS = {
+  'Smileys': ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','😊','😇','🥰','😍','🤩','😘','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️'],
+  'Gestures': ['👋','🤚','🖐','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🙏','✍️','💅','🤳'],
+  'People': ['👶','🧒','👦','👧','🧑','👱','👨','🧔','👩','🧓','👴','👵','🙍','🙎','🙅','🙆','💁','🙋','🧏','🙇','🤦','🤷','💆','💇','🚶','🧍','🧎','🏃','💃','🕺'],
+  'Nature': ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🦝','🐔','🐧','🐦','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🕷','🦂','🐢','🐍','🦎','🐙','🦑','🦐','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🌿','🌱','🌾','🍀','🌲','🌳','🌴','🌵','🌷','🌹','🥀','🌺','🌸','🌼','🌻','🌞','🌝','🌛','🌜','🌚','🌕','🌙','⭐','🌟','⭐','⛅','❄️','☃️','🌈','🔥','💧','🌊'],
+  'Food': ['🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶','🧄','🧅','🥔','🥐','🥯','🍞','🥖','🧀','🥚','🍳','🧈','🥞','🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🌮','🌯','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🍤','🍙','🍚','🍘','🍥','🥮','🧁','🍰','🎂','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧃','🥤','🧋','☕','🍵'],
+  'Objects': ['💎','🔮','🪄','💫','⭐','✨','💥','🔥','🎉','🎊','🎈','🎀','🎁','🏆','🥇','🥈','🥉','⚽','🏀','🏈','⚾','🎾','🎮','🕹','🎲','🧩','🧸','🎭','🎨','🎬','🎤','🎧','🎵','🎶','📱','💻','⌚','📡','🔋','🔌','💡','🔦','💰','💳','✉️','📝','📌','🔒','🔓','🔑','🗝','🔨','⚔️','🔧','⚙️','🔮','💊','🩺','🩹'],
+  'Symbols': ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','✡️','☯️','🆔','♻️','✅','❌','⭕','🛑','⛔','📛','🚫','💯','💢','❇️','✳️','❎','🔱','⚜️','🔰','ℹ️','🔤','🔡','🔠','🆖','🆗','🆙','🆒','🆕','🆓','❤️','👑','🌟','💫','⚡','🎯','🔥','💎']
+};
+const REACTIONS = ['❤️','👍','😂','😮','🔥','😢','👀','🎉'];
+
+// ── State ────────────────────────────────────────────────────────────────
+let ablyClient = null;
+let publicChannel = null;
+let presenceChannel = null;
+
+let myId = localStorage.getItem('kc_id') || genId();
+let myUsername = localStorage.getItem('kc_username') || null;
+let myAvatar = localStorage.getItem('kc_avatar') || '😀';
+let isFirstVisit = !myUsername;
+
+if (!myUsername) myUsername = genUsername();
+
+let currentRoom = 'public';
+let currentRoomData = null;
+let replyTo = null;
+let editingMsgId = null;
+let typingTimer = null;
+let isTyping = false;
+let unreadPublic = 0;
+let sidebarOpen = false;
+let pendingFile = null;
+
+// In-memory state
+const messages = { public: [] };
+const typingUsers = { public: new Map() };
+const onlineUsers = new Map();
+const knownRooms = new Map(); // roomId → {id, name, key, ownerId, locked, memberCount}
+const roomChannels = new Map(); // roomId → ably channel
+const myRooms = new Map(); // roomId → {key, ...} rooms I've joined (stored in localStorage)
+
+// Load saved room memberships
+try {
+  const saved = JSON.parse(localStorage.getItem('kc_rooms') || '{}');
+  Object.entries(saved).forEach(([id, data]) => myRooms.set(id, data));
+} catch(e) {}
+
+// ── Identity ─────────────────────────────────────────────────────────────
+function genId() {
+  const id = 'u_' + Math.random().toString(36).substr(2, 12);
+  localStorage.setItem('kc_id', id);
+  return id;
+}
+
+function genUsername() {
+  const adj = ['Cyber','Neon','Pixel','Shadow','Crypto','Quantum','Ghost','Storm','Void','Nova','Blaze','Frost','Echo','Phantom','Titan','Rogue','Surge','Vector','Nexus','Viper'];
+  const noun = ['Wolf','Hawk','Phoenix','Tiger','Cobra','Dragon','Eagle','Shark','Panda','Lion','Raven','Fox','Bear','Falcon','Lynx','Panther','Viper','Hydra','Orca','Rhino'];
+  const n = Math.floor(Math.random() * 900) + 100;
+  return adj[Math.floor(Math.random() * adj.length)] + noun[Math.floor(Math.random() * noun.length)] + n;
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────
+async function boot() {
+  updateSidebarUser();
+
+  // Try to connect to Ably
+  try {
+    await initAbly();
+  } catch (err) {
+    console.error('Ably connection failed:', err);
+    document.getElementById('setup-alert').classList.add('show');
+    document.getElementById('connect-overlay').style.display = 'none';
+    // Run in local demo mode
+    runDemoMode();
+    return;
+  }
+
+  document.getElementById('connect-overlay').style.display = 'none';
+  if (isFirstVisit) {
+    showSetup();
+  }
+}
+
+function runDemoMode() {
+  // Show UI in offline/demo mode
+  showToast('Running in demo mode — no Ably key configured', 'info');
+  if (isFirstVisit) showSetup();
+}
+
+// ── Ably Realtime ─────────────────────────────────────────────────────────
+async function initAbly() {
+  return new Promise((resolve, reject) => {
+    const statusEl = document.getElementById('connect-status-text');
+    statusEl.textContent = 'Authenticating…';
+
+    ablyClient = new Ably.Realtime({
+      authUrl: `${ABLY_AUTH_URL}?clientId=${encodeURIComponent(myId)}`,
+      clientId: myId
+    });
+
+    ablyClient.connection.on('connected', () => {
+      document.getElementById('conn-badge').classList.remove('connecting', 'offline');
+      statusEl.textContent = 'Connected!';
+      subscribePublicChannel();
+      subscribePresence();
+      // Re-subscribe to saved rooms
+      myRooms.forEach((data, roomId) => subscribeRoomChannel(roomId));
+      renderSavedRooms();
+      resolve();
+    });
+
+    ablyClient.connection.on('failed', (err) => {
+      document.getElementById('conn-badge').classList.add('offline');
+      reject(err);
+    });
+
+    ablyClient.connection.on('disconnected', () => {
+      document.getElementById('conn-badge').classList.add('connecting');
+    });
+
+    // Timeout after 8 seconds
+    setTimeout(() => {
+      if (ablyClient.connection.state !== 'connected') {
+        reject(new Error('Connection timeout'));
+      }
+    }, 8000);
+  });
+}
+
+function subscribePublicChannel() {
+  publicChannel = ablyClient.channels.get('keychat:public');
+
+  // Subscribe to all message types
+  publicChannel.subscribe('msg', (msg) => {
+    const data = msg.data;
+    if (!messages['public']) messages['public'] = [];
+    if (messages['public'].find(m => m.id === data.id)) return;
+    messages['public'].push(data);
+    if (messages['public'].length > 200) messages['public'].shift();
+    if (currentRoom === 'public') appendMessage('public', data);
+    else { unreadPublic++; updatePublicBadge(); }
+  });
+
+  publicChannel.subscribe('react', ({ data }) => {
+    updateReactions('public', data.messageId, data.reactions);
+  });
+
+  publicChannel.subscribe('edit', ({ data }) => {
+    updateMessageEdit('public', data.messageId, data.text, true);
+  });
+
+  publicChannel.subscribe('delete', ({ data }) => {
+    deleteMessageFromUI('public', data.messageId);
+    const idx = messages['public']?.findIndex(m => m.id === data.messageId);
+    if (idx > -1) messages['public'].splice(idx, 1);
+  });
+
+  publicChannel.subscribe('pin', ({ data }) => {
+    updatePin('public', data.messageId, data.pinned);
+  });
+
+  publicChannel.subscribe('typing', ({ data }) => {
+    if (data.userId === myId) return;
+    if (!typingUsers['public']) typingUsers['public'] = new Map();
+    if (data.typing) typingUsers['public'].set(data.userId, data.username);
+    else typingUsers['public'].delete(data.userId);
+    if (currentRoom === 'public') renderTyping('public');
+  });
+
+  publicChannel.subscribe('system', ({ data }) => {
+    appendSystemMsg(data.text);
+  });
+
+  // Get message history
+  publicChannel.history({ limit: 100 }, (err, result) => {
+    if (err || !result) return;
+    const msgs = result.items
+      .filter(m => m.name === 'msg')
+      .map(m => m.data)
+      .reverse();
+    messages['public'] = msgs;
+    if (currentRoom === 'public') renderMessages('public');
+  });
+}
+
+function subscribePresence() {
+  presenceChannel = ablyClient.channels.get('keychat:public');
+
+  presenceChannel.presence.subscribe('enter', updateOnlineUsers);
+  presenceChannel.presence.subscribe('leave', updateOnlineUsers);
+  presenceChannel.presence.subscribe('update', updateOnlineUsers);
+
+  presenceChannel.presence.enter({
+    username: myUsername,
+    avatar: myAvatar,
+    room: currentRoom
+  });
+}
+
+function updatePresenceData() {
+  if (!presenceChannel) return;
+  presenceChannel.presence.update({
+    username: myUsername,
+    avatar: myAvatar,
+    room: currentRoom
+  });
+}
+
+function updateOnlineUsers() {
+  if (!presenceChannel) return;
+  presenceChannel.presence.get((err, members) => {
+    if (err || !members) return;
+    onlineUsers.clear();
+    members.forEach(m => {
+      onlineUsers.set(m.clientId, { id: m.clientId, ...m.data });
+    });
+    renderOnlineUsers([...onlineUsers.values()]);
+  });
+}
+
+function subscribeRoomChannel(roomId) {
+  if (roomChannels.has(roomId)) return;
+
+  const ch = ablyClient.channels.get(`keychat:rooms:${roomId}`);
+  roomChannels.set(roomId, ch);
+  if (!messages[roomId]) messages[roomId] = [];
+
+  ch.subscribe('msg', ({ data }) => {
+    if (messages[roomId].find(m => m.id === data.id)) return;
+    messages[roomId].push(data);
+    if (messages[roomId].length > 200) messages[roomId].shift();
+    if (currentRoom === roomId) appendMessage(roomId, data);
+  });
+
+  ch.subscribe('react', ({ data }) => {
+    updateReactions(roomId, data.messageId, data.reactions);
+  });
+
+  ch.subscribe('edit', ({ data }) => {
+    updateMessageEdit(roomId, data.messageId, data.text, true);
+  });
+
+  ch.subscribe('delete', ({ data }) => {
+    deleteMessageFromUI(roomId, data.messageId);
+    const idx = messages[roomId]?.findIndex(m => m.id === data.messageId);
+    if (idx > -1) messages[roomId].splice(idx, 1);
+  });
+
+  ch.subscribe('system', ({ data }) => {
+    if (currentRoom === roomId) appendSystemMsg(data.text);
+  });
+
+  ch.subscribe('rename', ({ data }) => {
+    const roomData = myRooms.get(roomId);
+    if (roomData) roomData.name = data.name;
+    if (currentRoom === roomId) {
+      document.getElementById('ch-name').textContent = data.name;
+      if (currentRoomData) currentRoomData.name = data.name;
+    }
+    renderSavedRooms();
+  });
+
+  ch.subscribe('members', ({ data }) => {
+    if (currentRoom === roomId) renderMembers(data.members);
+  });
+
+  ch.subscribe('kick', ({ data }) => {
+    if (data.targetId === myId) {
+      showToast('You were removed from the room', 'error');
+      leaveRoomLocally(roomId);
+      switchToPublic();
+    }
+  });
+
+  ch.subscribe('deleted', () => {
+    if (currentRoom === roomId) {
+      showToast('This room was deleted', 'error');
+      leaveRoomLocally(roomId);
+      switchToPublic();
+    }
+  });
+
+  ch.subscribe('lock', ({ data }) => {
+    const roomData = myRooms.get(roomId);
+    if (roomData) roomData.locked = data.locked;
+    if (currentRoom === roomId && currentRoomData) currentRoomData.locked = data.locked;
+  });
+
+  ch.subscribe('typing', ({ data }) => {
+    if (data.userId === myId) return;
+    if (!typingUsers[roomId]) typingUsers[roomId] = new Map();
+    if (data.typing) typingUsers[roomId].set(data.userId, data.username);
+    else typingUsers[roomId].delete(data.userId);
+    if (currentRoom === roomId) renderTyping(roomId);
+  });
+
+  // Load history
+  ch.history({ limit: 100 }, (err, result) => {
+    if (err || !result) return;
+    const msgs = result.items
+      .filter(m => m.name === 'msg')
+      .map(m => m.data)
+      .reverse();
+    messages[roomId] = msgs;
+    if (currentRoom === roomId) renderMessages(roomId);
+  });
+
+  return ch;
+}
+
+// ── Message Publishing ────────────────────────────────────────────────────
+function publishPublic(event, data) {
+  if (!publicChannel) return;
+  publicChannel.publish(event, data);
+}
+
+function publishRoom(roomId, event, data) {
+  const ch = roomChannels.get(roomId);
+  if (!ch) return;
+  ch.publish(event, data);
+}
+
+// ── Setup Flow ────────────────────────────────────────────────────────────
+function showSetup() {
+  const suggestion = genUsername();
+  document.getElementById('setup-suggest-text').textContent = suggestion;
+  document.getElementById('setup-username').value = '';
+  document.getElementById('setup-avatar').value = myAvatar;
+  document.getElementById('setup-overlay').classList.add('show');
+  setTimeout(() => document.getElementById('setup-username').focus(), 300);
+}
+
+function useSuggestion() {
+  document.getElementById('setup-username').value = document.getElementById('setup-suggest-text').textContent;
+}
+
+function completeSetup() {
+  const name = document.getElementById('setup-username').value.trim();
+  const avatar = document.getElementById('setup-avatar').value.trim() || '😀';
+  if (!name) { document.getElementById('setup-username').focus(); return; }
+
+  myUsername = name;
+  myAvatar = avatar;
+  localStorage.setItem('kc_username', myUsername);
+  localStorage.setItem('kc_avatar', myAvatar);
+  document.getElementById('setup-overlay').classList.remove('show');
+  updateSidebarUser();
+  updatePresenceData();
+
+  // Announce arrival
+  if (publicChannel) {
+    publishPublic('system', { text: `${myUsername} joined the chat`, ts: Date.now() });
+  }
+}
+
+function updateSidebarUser() {
+  document.getElementById('my-username').textContent = myUsername;
+  document.getElementById('my-avatar').textContent = myAvatar;
+  const [bg, fg] = getAvatarColor(myId);
+  document.getElementById('my-avatar').style.cssText = `background:${bg};color:${fg};`;
+}
+
+// ── Message ID Generator ──────────────────────────────────────────────────
+function msgId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────
+function getAvatarColor(userId) {
+  const colors = [
+    ['#5865F2','#fff'],['#EC4899','#fff'],['#22C55E','#fff'],
+    ['#F59E0B','#000'],['#EF4444','#fff'],['#8B5CF6','#fff'],
+    ['#06B6D4','#000'],['#10B981','#fff'],['#F97316','#fff'],['#6366F1','#fff']
+  ];
+  let hash = 0;
+  for (let c of (userId || '')) hash = (hash << 5) - hash + c.charCodeAt(0);
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function makeAvatar(userId, avatarEmoji, size = 36, className = '') {
+  const [bg, fg] = getAvatarColor(userId);
+  return `<div class="${className}" style="width:${size}px;height:${size}px;border-radius:50%;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:${size*0.45}px;font-weight:700;flex-shrink:0;">${avatarEmoji || '😀'}</div>`;
+}
+
+function renderMessages(room) {
+  const area = document.getElementById('messages-area');
+  const msgs = messages[room] || [];
+  area.innerHTML = '';
+  const empty = document.getElementById('empty-state');
+  if (msgs.length === 0) {
+    area.appendChild(empty);
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  msgs.forEach(m => area.appendChild(buildMessageEl(room, m)));
+  scrollToBottom();
+}
+
+function appendMessage(room, msg) {
+  if (currentRoom !== room) return;
+  const area = document.getElementById('messages-area');
+  document.getElementById('empty-state').style.display = 'none';
+  area.appendChild(buildMessageEl(room, msg));
+  scrollToBottom();
+}
+
+function appendSystemMsg(text) {
+  const area = document.getElementById('messages-area');
+  const el = document.createElement('div');
+  el.className = 'sys-msg';
+  el.textContent = text;
+  area.appendChild(el);
+  scrollToBottom();
+}
+
+function buildMessageEl(room, msg) {
+  const isMe = msg.userId === myId;
+  const ts = new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const div = document.createElement('div');
+  div.className = `msg-group${isMe ? ' me' : ''}`;
+  div.dataset.msgId = msg.id;
+  div.dataset.userId = msg.userId;
+  div.dataset.room = room;
+
+  let replyHtml = '';
+  if (msg.replyTo) {
+    replyHtml = `<div class="reply-ref" onclick="scrollToMsg('${msg.replyTo.id}')">
+      <span class="reply-ref-user">↩ ${escHtml(msg.replyTo.username)}</span>
+      <span>${escHtml((msg.replyTo.text || '').substring(0, 60))}</span>
+    </div>`;
+  }
+
+  let contentHtml = '';
+  if (msg.text) contentHtml += `<span>${linkify(escHtml(msg.text))}</span>`;
+  if (msg.file) contentHtml += buildFileHtml(msg.file);
+
+  const reactionsHtml = buildReactionsHtml(msg.reactions || {}, msg.id, room);
+
+  div.innerHTML = `
+    ${!isMe ? makeAvatar(msg.userId, msg.avatar, 36, 'msg-avatar') : ''}
+    <div class="msg-body">
+      ${msg.pinned ? '<div class="msg-pinned-badge">📌 Pinned</div>' : ''}
+      <div class="msg-header">
+        <span class="msg-username" style="color:${getAvatarColor(msg.userId)[0]}">${escHtml(msg.username)}</span>
+        <span class="msg-ts">${ts}</span>
+        ${msg.edited ? '<span class="msg-edited">(edited)</span>' : ''}
+      </div>
+      ${replyHtml}
+      <div class="msg-bubble">${contentHtml}</div>
+      ${reactionsHtml}
+    </div>
+    ${isMe ? makeAvatar(msg.userId, msg.avatar, 36, 'msg-avatar') : ''}
+    <div class="msg-actions">
+      ${REACTIONS.slice(0,5).map(e => `<button class="ma-btn" onclick="reactMsg('${msg.id}','${room}','${e}')" title="${e}">${e}</button>`).join('')}
+      <button class="ma-btn" onclick="replyMsg('${msg.id}','${room}')" title="Reply">↩</button>
+      ${isMe ? `<button class="ma-btn" onclick="editMsg('${msg.id}','${room}')" title="Edit">✏️</button>` : ''}
+      ${isMe ? `<button class="ma-btn" onclick="deleteMsg('${msg.id}','${room}')" title="Delete" style="color:var(--danger)">🗑</button>` : ''}
+      <button class="ma-btn" onclick="copyMsgText('${msg.id}','${room}')" title="Copy">📋</button>
+      <button class="ma-btn" onclick="pinMsg('${msg.id}','${room}')" title="Pin">📌</button>
+    </div>
+  `;
+
+  div.addEventListener('contextmenu', e => showCtxMenu(e, msg.id, room, isMe));
+  return div;
+}
+
+function linkify(text) {
+  return text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--primary)">$1</a>');
+}
+
+function buildFileHtml(file) {
+  const name = escHtml(file.originalName || 'file');
+  const size = formatSize(file.size || 0);
+  const mt = file.mimetype || '';
+
+  if (mt.startsWith('image/') && file.dataUrl) {
+    return `<div class="file-preview"><img src="${file.dataUrl}" alt="${name}" loading="lazy" style="max-width:260px;max-height:200px;object-fit:cover;border-radius:10px;margin-top:4px;cursor:pointer" onclick="window.open('${file.dataUrl}')"></div>`;
+  }
+  if (mt.startsWith('video/') && file.dataUrl) {
+    return `<div class="file-preview"><video controls src="${file.dataUrl}" style="max-width:280px;border-radius:10px;margin-top:4px"></video></div>`;
+  }
+  // For non-previewable or non-image/video, show a doc tile
+  const icons = { 'application/pdf': '📄', 'application/zip': '📦', 'text/plain': '📝', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '📝' };
+  const icon = icons[mt] || '📎';
+  const href = file.dataUrl || '#';
+  return `<a class="file-doc" href="${href}" download="${escHtml(file.originalName || 'file')}" target="_blank">
+    <span class="file-doc-icon">${icon}</span>
+    <div class="file-doc-info">
+      <div class="file-doc-name">${name}</div>
+      <div class="file-doc-size">${size}</div>
+    </div>
+    <span>⬇️</span>
+  </a>`;
+}
+
+function buildReactionsHtml(reactions, msgId, room) {
+  const entries = Object.entries(reactions).filter(([, arr]) => arr.length > 0);
+  if (!entries.length) return '';
+  return `<div class="msg-reactions">${entries.map(([emoji, users]) => {
+    const mine = users.includes(myId);
+    return `<div class="reaction-pill${mine ? ' mine' : ''}" onclick="reactMsg('${msgId}','${room}','${emoji}')">
+      <span>${emoji}</span><span class="reaction-count">${users.length}</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function updateReactions(room, messageId, reactions) {
+  const el = document.querySelector(`[data-msg-id="${messageId}"]`);
+  if (!el) return;
+  const existing = el.querySelector('.msg-reactions');
+  const newHtml = buildReactionsHtml(reactions, messageId, room);
+  if (existing) existing.outerHTML = newHtml || '';
+  else {
+    const bubble = el.querySelector('.msg-bubble');
+    if (bubble && newHtml) bubble.insertAdjacentHTML('afterend', newHtml);
+  }
+  const arr = messages[room];
+  if (arr) { const m = arr.find(m => m.id === messageId); if (m) m.reactions = reactions; }
+}
+
+function updateMessageEdit(room, messageId, text, edited) {
+  const el = document.querySelector(`[data-msg-id="${messageId}"]`);
+  if (!el) return;
+  const bubble = el.querySelector('.msg-bubble');
+  if (bubble) {
+    const span = bubble.querySelector('span');
+    if (span) span.innerHTML = linkify(escHtml(text));
+  }
+  if (edited && !el.querySelector('.msg-edited')) {
+    el.querySelector('.msg-ts')?.insertAdjacentHTML('afterend', '<span class="msg-edited">(edited)</span>');
+  }
+  const arr = messages[room];
+  if (arr) { const m = arr.find(m => m.id === messageId); if (m) { m.text = text; m.edited = edited; } }
+}
+
+function deleteMessageFromUI(room, messageId) {
+  document.querySelector(`[data-msg-id="${messageId}"]`)?.remove();
+}
+
+function updatePin(room, messageId, pinned) {
+  const el = document.querySelector(`[data-msg-id="${messageId}"]`);
+  if (!el) return;
+  const badge = el.querySelector('.msg-pinned-badge');
+  if (pinned && !badge) el.querySelector('.msg-body')?.insertAdjacentHTML('afterbegin', '<div class="msg-pinned-badge">📌 Pinned</div>');
+  else if (!pinned && badge) badge.remove();
+  const arr = messages[room];
+  if (arr) { const m = arr.find(m => m.id === messageId); if (m) m.pinned = pinned; }
+}
+
+function renderTyping(room) {
+  const bar = document.getElementById('typing-bar');
+  const map = typingUsers[room] || new Map();
+  const others = [...map.values()];
+  if (!others.length) { bar.innerHTML = ''; return; }
+  const names = others.slice(0, 3).join(', ') + (others.length > 3 ? ` +${others.length - 3}` : '');
+  bar.innerHTML = `<div class="typing-dots"><span></span><span></span><span></span></div><span>${names} ${others.length === 1 ? 'is' : 'are'} typing…</span>`;
+}
+
+function renderOnlineUsers(users) {
+  const list = document.getElementById('online-list-sidebar');
+  const count = document.getElementById('online-count');
+  count.textContent = users.length;
+  list.innerHTML = users.slice(0, 15).map(u => {
+    const [bg, fg] = getAvatarColor(u.id);
+    return `<div class="user-pill">
+      <div class="upill-avatar" style="background:${bg};color:${fg}">${u.avatar || '😀'}</div>
+      <span style="font-size:13px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(u.username || 'User')}</span>
+      <div class="online-dot"></div>
+    </div>`;
+  }).join('');
+}
+
+function renderSavedRooms() {
+  const list = document.getElementById('rooms-list-sidebar');
+  list.innerHTML = [...myRooms.entries()].map(([id, r]) => `
+    <div class="nav-item room-item${currentRoom === id ? ' active' : ''}" id="room-nav-${id}" onclick="switchToRoom('${id}')">
+      <div class="ni-icon">${r.locked ? '🔒' : '🔑'}</div>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(r.name || id)}</span>
+    </div>`).join('');
+}
+
+function renderMembers(members) {
+  const list = document.getElementById('members-list');
+  const count = document.getElementById('members-count');
+  count.textContent = members.length;
+  list.innerHTML = members.map(m => {
+    const [bg, fg] = getAvatarColor(m.id);
+    const isOwner = currentRoomData && m.id === currentRoomData.ownerId;
+    const isMe = m.id === myId;
+    return `<div class="mp-member">
+      <div class="mp-avatar" style="background:${bg};color:${fg}">${m.avatar || '😀'}</div>
+      <span class="mp-name">${escHtml(m.username)}${isMe ? ' (you)' : ''}</span>
+      ${isOwner ? '<span class="mp-owner-badge">Owner</span>' : ''}
+      ${!isOwner && currentRoomData?.ownerId === myId ?
+        `<button class="ma-btn" onclick="kickUser('${m.id}')" style="margin-left:auto;font-size:12px;" title="Remove">✕</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ── Navigation ────────────────────────────────────────────────────────────
+function switchToPublic() {
+  currentRoom = 'public';
+  currentRoomData = null;
+  unreadPublic = 0;
+  updatePublicBadge();
+  document.getElementById('ch-icon').textContent = '#';
+  document.getElementById('ch-name').textContent = 'Public Chat';
+  document.getElementById('ch-desc').textContent = 'Global chat — everyone can see messages';
+  document.getElementById('members-btn').style.display = 'none';
+  document.getElementById('room-settings-btn').style.display = 'none';
+  document.getElementById('members-panel').classList.remove('show');
+  document.getElementById('msg-input').placeholder = 'Message #public-chat…';
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('nav-public').classList.add('active');
+  renderMessages('public');
+  updatePresenceData();
+  closeSidebar();
+}
+
+async function switchToRoom(roomId) {
+  if (currentRoom === roomId) return closeSidebar();
+  const savedRoom = myRooms.get(roomId);
+  if (!savedRoom) {
+    document.getElementById('join-room-id').value = roomId;
+    document.getElementById('join-room-key').value = '';
+    showModal('join-room-modal');
+    return;
+  }
+  enterRoom(roomId, savedRoom);
+  closeSidebar();
+}
+
+function enterRoom(roomId, roomData) {
+  currentRoom = roomId;
+  currentRoomData = roomData;
+  if (!messages[roomId]) messages[roomId] = [];
+  if (!typingUsers[roomId]) typingUsers[roomId] = new Map();
+
+  document.getElementById('ch-icon').textContent = '🔑';
+  document.getElementById('ch-name').textContent = roomData.name || roomId;
+  document.getElementById('ch-desc').textContent = `Room · ${roomId}`;
+  document.getElementById('members-btn').style.display = 'flex';
+  document.getElementById('room-settings-btn').style.display = 'flex';
+  document.getElementById('msg-input').placeholder = `Message ${roomData.name || 'room'}…`;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const navEl = document.getElementById(`room-nav-${roomId}`);
+  if (navEl) navEl.classList.add('active');
+
+  subscribeRoomChannel(roomId);
+  renderMessages(roomId);
+  updatePresenceData();
+
+  // Announce join
+  publishRoom(roomId, 'system', { text: `${myUsername} joined the room`, ts: Date.now() });
+
+  // Get current presence members for this room
+  updateRoomMembers(roomId);
+}
+
+function updateRoomMembers(roomId) {
+  const ch = roomChannels.get(roomId);
+  if (!ch) return;
+  // Collect members from presence on public channel who are in this room
+  if (presenceChannel) {
+    presenceChannel.presence.get((err, members) => {
+      if (err) return;
+      const roomMembers = members
+        .filter(m => m.data?.room === roomId)
+        .map(m => ({ id: m.clientId, username: m.data.username, avatar: m.data.avatar }));
+      // Always include self
+      if (!roomMembers.find(m => m.id === myId)) {
+        roomMembers.push({ id: myId, username: myUsername, avatar: myAvatar });
+      }
+      renderMembers(roomMembers);
+      publishRoom(roomId, 'members', { members: roomMembers });
+    });
+  }
+}
+
+function leaveRoomLocally(roomId) {
+  myRooms.delete(roomId);
+  saveRoomsToStorage();
+  const ch = roomChannels.get(roomId);
+  if (ch) { ch.unsubscribe(); roomChannels.delete(roomId); }
+  delete messages[roomId];
+  renderSavedRooms();
+}
+
+function saveRoomsToStorage() {
+  const obj = {};
+  myRooms.forEach((v, k) => obj[k] = v);
+  localStorage.setItem('kc_rooms', JSON.stringify(obj));
+}
+
+function updatePublicBadge() {
+  const badge = document.getElementById('public-badge');
+  if (unreadPublic > 0) { badge.style.display = ''; badge.textContent = unreadPublic > 99 ? '99+' : unreadPublic; }
+  else badge.style.display = 'none';
+}
+
+// ── Messaging ─────────────────────────────────────────────────────────────
+function sendMessage() {
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text && !pendingFile) return;
+
+  const msg = {
+    id: msgId(),
+    userId: myId,
+    username: myUsername,
+    avatar: myAvatar,
+    text,
+    ts: Date.now(),
+    reactions: {},
+    edited: false,
+    pinned: false,
+    replyTo
+  };
+  if (pendingFile) { msg.file = pendingFile; pendingFile = null; }
+
+  if (currentRoom === 'public') {
+    messages['public'].push(msg);
+    if (messages['public'].length > 200) messages['public'].shift();
+    appendMessage('public', msg);
+    publishPublic('msg', msg);
+  } else {
+    if (!messages[currentRoom]) messages[currentRoom] = [];
+    messages[currentRoom].push(msg);
+    appendMessage(currentRoom, msg);
+    publishRoom(currentRoom, 'msg', msg);
+  }
+
+  input.value = '';
+  input.style.height = 'auto';
+  clearReply();
+  stopTyping();
+}
+
+function handleInputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+let typingTimeout;
+function handleTyping() {
+  if (!isTyping) { isTyping = true; emitTyping(true); }
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(stopTyping, 2000);
+}
+
+function stopTyping() {
+  if (isTyping) { isTyping = false; emitTyping(false); }
+}
+
+function emitTyping(typing) {
+  const data = { userId: myId, username: myUsername, typing };
+  if (currentRoom === 'public') publishPublic('typing', data);
+  else publishRoom(currentRoom, 'typing', data);
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// ── Message Actions ──────────────────────────────────────────────────────
+function replyMsg(msgId, room) {
+  const msg = (messages[room] || []).find(m => m.id === msgId);
+  if (!msg) return;
+  replyTo = { id: msg.id, username: msg.username, text: msg.text || '' };
+  document.getElementById('reply-preview-text').textContent = `${msg.username}: ${(msg.text || '').substring(0, 60)}`;
+  document.getElementById('reply-preview').classList.add('show');
+  document.getElementById('msg-input').focus();
+}
+
+function clearReply() {
+  replyTo = null;
+  document.getElementById('reply-preview').classList.remove('show');
+}
+
+function editMsg(msgId, room) {
+  const msg = (messages[room] || []).find(m => m.id === msgId);
+  if (!msg) return;
+  editingMsgId = msgId;
+  document.getElementById('edit-msg-text').value = msg.text || '';
+  showModal('edit-msg-modal');
+}
+
+function saveEditMessage() {
+  const text = document.getElementById('edit-msg-text').value.trim();
+  if (!text) return;
+  const data = { messageId: editingMsgId };
+  const arr = messages[currentRoom];
+  if (arr) { const m = arr.find(m => m.id === editingMsgId); if (m) { m.text = text; m.edited = true; } }
+  updateMessageEdit(currentRoom, editingMsgId, text, true);
+  if (currentRoom === 'public') publishPublic('edit', { ...data, text });
+  else publishRoom(currentRoom, 'edit', { ...data, text });
+  closeModal('edit-msg-modal');
+}
+
+function deleteMsg(msgId, room) {
+  deleteMessageFromUI(room, msgId);
+  const idx = messages[room]?.findIndex(m => m.id === msgId);
+  if (idx > -1) messages[room].splice(idx, 1);
+  if (room === 'public') publishPublic('delete', { messageId: msgId });
+  else publishRoom(room, 'delete', { messageId: msgId });
+}
+
+function reactMsg(msgId, room, emoji) {
+  const arr = messages[room];
+  if (!arr) return;
+  const msg = arr.find(m => m.id === msgId);
+  if (!msg) return;
+  if (!msg.reactions) msg.reactions = {};
+  if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
+  const idx = msg.reactions[emoji].indexOf(myId);
+  if (idx === -1) msg.reactions[emoji].push(myId);
+  else msg.reactions[emoji].splice(idx, 1);
+  updateReactions(room, msgId, msg.reactions);
+  if (room === 'public') publishPublic('react', { messageId: msgId, reactions: msg.reactions });
+  else publishRoom(room, 'react', { messageId: msgId, reactions: msg.reactions });
+}
+
+function pinMsg(msgId, room) {
+  const arr = messages[room];
+  if (!arr) return;
+  const msg = arr.find(m => m.id === msgId);
+  if (!msg) return;
+  msg.pinned = !msg.pinned;
+  updatePin(room, msgId, msg.pinned);
+  if (room === 'public') publishPublic('pin', { messageId: msgId, pinned: msg.pinned });
+  else publishRoom(room, 'pin', { messageId: msgId, pinned: msg.pinned });
+}
+
+function copyMsgText(msgId, room) {
+  const msg = (messages[room] || []).find(m => m.id === msgId);
+  if (msg?.text) { navigator.clipboard.writeText(msg.text); showToast('Copied!', 'success'); }
+}
+
+function scrollToMsg(msgId) {
+  document.querySelector(`[data-msg-id="${msgId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ── File Upload ───────────────────────────────────────────────────────────
+function triggerFileUpload() { document.getElementById('file-input').click(); }
+
+async function handleFileUpload(files) {
+  if (!files.length) return;
+  const file = files[0];
+  const MAX = 5 * 1024 * 1024; // 5MB limit for base64 in Ably messages
+  if (file.size > MAX) {
+    showToast('File too large for direct send (max 5MB). Use a file hosting service for larger files.', 'error');
+    return;
+  }
+
+  const wrap = document.getElementById('upload-progress-wrap');
+  const bar = document.getElementById('upload-progress-bar');
+  wrap.style.display = 'block';
+  bar.style.width = '30%';
+
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    bar.style.width = '100%';
+    setTimeout(() => { wrap.style.display = 'none'; bar.style.width = '0%'; }, 500);
+
+    pendingFile = {
+      originalName: file.name,
+      mimetype: file.type,
+      size: file.size,
+      dataUrl
+    };
+    showToast(`Ready: ${file.name}`, 'success');
+    sendMessage();
+  } catch (e) {
+    wrap.style.display = 'none';
+    showToast('Failed to read file', 'error');
+  }
+  document.getElementById('file-input').value = '';
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Paste to upload
+document.addEventListener('paste', (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file) handleFileUpload([file]);
+      return;
+    }
+  }
+});
+
+// Drag and drop
+document.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  document.getElementById('paste-overlay').classList.add('show');
+});
+document.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) document.getElementById('paste-overlay').classList.remove('show');
+});
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.getElementById('paste-overlay').classList.remove('show');
+  const files = e.dataTransfer?.files;
+  if (files?.length) handleFileUpload(files);
+});
+
+// ── Emoji Picker ──────────────────────────────────────────────────────────
+let activeEpCat = 'Smileys';
+
+function buildEmojiPicker() {
+  const catIcons = { Smileys:'😀', Gestures:'👋', People:'👤', Nature:'🌿', Food:'🍎', Objects:'💡', Symbols:'❤️' };
+  document.getElementById('ep-cats').innerHTML = Object.keys(EMOJI_CATS).map(k =>
+    `<button class="ep-cat-btn${k===activeEpCat?' active':''}" onclick="switchEpCat('${k}')" title="${k}">${catIcons[k]||'•'}</button>`
+  ).join('');
+  renderEpGrid(activeEpCat);
+}
+
+function switchEpCat(cat) {
+  activeEpCat = cat;
+  document.querySelectorAll('.ep-cat-btn').forEach((b, i) => {
+    b.classList.toggle('active', Object.keys(EMOJI_CATS)[i] === cat);
+  });
+  renderEpGrid(cat);
+}
+
+function renderEpGrid(cat) {
+  document.getElementById('ep-grid').innerHTML = EMOJI_CATS[cat].map(e =>
+    `<div class="ep-emoji" onclick="insertEmoji('${e}')">${e}</div>`
+  ).join('');
+}
+
+function insertEmoji(e) {
+  const input = document.getElementById('msg-input');
+  const start = input.selectionStart;
+  input.value = input.value.substring(0, start) + e + input.value.substring(input.selectionEnd);
+  input.selectionStart = input.selectionEnd = start + e.length;
+  input.focus();
+  autoResize(input);
+}
+
+function toggleEmoji() {
+  const picker = document.getElementById('emoji-picker');
+  picker.classList.toggle('show');
+  if (picker.classList.contains('show')) buildEmojiPicker();
+}
+
+// ── Context Menu ──────────────────────────────────────────────────────────
+function showCtxMenu(e, msgId, room, isMe) {
+  e.preventDefault();
+  const menu = document.getElementById('ctx-menu');
+  menu.innerHTML = `
+    <div style="display:flex;gap:4px;padding:4px 6px 2px">
+      ${REACTIONS.map(em => `<div class="ctx-item" style="padding:4px 6px;font-size:18px" onclick="reactMsg('${msgId}','${room}','${em}')">${em}</div>`).join('')}
+    </div>
+    <div class="ctx-divider"></div>
+    <div class="ctx-item" onclick="replyMsg('${msgId}','${room}')">↩ Reply</div>
+    <div class="ctx-item" onclick="copyMsgText('${msgId}','${room}')">📋 Copy</div>
+    ${isMe ? `<div class="ctx-item" onclick="editMsg('${msgId}','${room}')">✏️ Edit</div>` : ''}
+    <div class="ctx-item" onclick="pinMsg('${msgId}','${room}')">📌 Pin</div>
+    ${isMe ? `<div class="ctx-item danger" onclick="deleteMsg('${msgId}','${room}')">🗑 Delete</div>` : ''}
+  `;
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+  menu.style.top = Math.min(e.clientY, window.innerHeight - 250) + 'px';
+  menu.classList.add('show');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#ctx-menu')) document.getElementById('ctx-menu').classList.remove('show');
+  if (!e.target.closest('#emoji-picker') && !e.target.closest('.input-action')) document.getElementById('emoji-picker').classList.remove('show');
+  if (!e.target.closest('#sidebar') && sidebarOpen) closeSidebar();
+});
+
+// ── Modals ────────────────────────────────────────────────────────────────
+function showModal(id) {
+  document.getElementById(id).classList.add('show');
+  if (id === 'settings-modal') {
+    document.getElementById('settings-username').value = myUsername;
+    document.getElementById('settings-avatar').value = myAvatar;
+  }
+  if (id === 'room-settings-modal') populateRoomSettings();
+}
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+document.querySelectorAll('.modal-overlay').forEach(o => {
+  o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
+});
+
+// ── Rooms ─────────────────────────────────────────────────────────────────
+async function createRoom() {
+  const name = document.getElementById('create-room-name').value.trim() || '';
+  closeModal('create-room-modal');
+
+  try {
+    const res = await fetch(ROOMS_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', name, ownerId: myId })
+    });
+    const data = await res.json();
+    if (data.error) return showToast(data.error, 'error');
+
+    document.getElementById('rc-room-id').textContent = data.id;
+    document.getElementById('rc-room-key').textContent = data.key;
+    showModal('room-created-modal');
+
+    // Save room locally
+    myRooms.set(data.id, { name: data.name, key: data.key, ownerId: data.ownerId, locked: false });
+    saveRoomsToStorage();
+    renderSavedRooms();
+
+    enterRoom(data.id, myRooms.get(data.id));
+  } catch (e) {
+    // Fallback: create room locally (demo mode)
+    const roomId = Math.random().toString(36).substr(2, 6);
+    const key = `KEY-${Math.random().toString(36).substr(2,4).toUpperCase()}-${Math.random().toString(36).substr(2,4).toUpperCase()}`;
+    const roomName = name || `Room ${roomId}`;
+
+    document.getElementById('rc-room-id').textContent = roomId;
+    document.getElementById('rc-room-key').textContent = key;
+    showModal('room-created-modal');
+
+    myRooms.set(roomId, { name: roomName, key, ownerId: myId, locked: false });
+    saveRoomsToStorage();
+    renderSavedRooms();
+    enterRoom(roomId, myRooms.get(roomId));
+  }
+  document.getElementById('create-room-name').value = '';
+}
+
+async function joinRoom() {
+  const roomId = document.getElementById('join-room-id').value.trim().toLowerCase();
+  const key = document.getElementById('join-room-key').value.trim();
+  const errEl = document.getElementById('join-error');
+  errEl.style.display = 'none';
+
+  if (!roomId || !key) {
+    errEl.textContent = 'Please fill in both fields.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const res = await fetch(ROOMS_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'validate', roomId, key, userId: myId })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      errEl.textContent = '🚫 ' + data.error;
+      errEl.style.display = 'block';
+      return;
+    }
+
+    closeModal('join-room-modal');
+    myRooms.set(roomId, { name: data.name || roomId, key, ownerId: data.ownerId, locked: data.locked || false });
+    saveRoomsToStorage();
+    renderSavedRooms();
+    enterRoom(roomId, myRooms.get(roomId));
+
+  } catch(e) {
+    // Demo mode: accept any key
+    showToast('Server validation unavailable — joining in demo mode', 'info');
+    closeModal('join-room-modal');
+    myRooms.set(roomId, { name: `Room ${roomId}`, key, ownerId: null, locked: false });
+    saveRoomsToStorage();
+    renderSavedRooms();
+    enterRoom(roomId, myRooms.get(roomId));
+  }
+
+  document.getElementById('join-room-id').value = '';
+  document.getElementById('join-room-key').value = '';
+}
+
+function showRoomSettings() {
+  if (!currentRoomData) return;
+  showModal('room-settings-modal');
+}
+
+function populateRoomSettings() {
+  if (!currentRoomData) return;
+  const isOwner = currentRoomData.ownerId === myId;
+  document.getElementById('rs-room-name-label').textContent = currentRoomData.name || currentRoom;
+  document.getElementById('rs-room-name').value = currentRoomData.name || '';
+  const keyDisplay = document.getElementById('rs-key-display');
+  keyDisplay.style.display = isOwner ? 'block' : 'none';
+  if (isOwner) {
+    document.getElementById('rs-room-id').textContent = currentRoom;
+    document.getElementById('rs-room-key').textContent = currentRoomData.key || '(hidden)';
+  }
+  document.getElementById('rs-owner-section').style.display = isOwner ? 'block' : 'none';
+  document.getElementById('rs-save-btn').style.display = isOwner ? '' : 'none';
+  document.getElementById('rs-lock-btn').textContent = currentRoomData.locked ? '🔓 Unlock Room' : '🔒 Lock Room';
+}
+
+function saveRoomSettings() {
+  if (!currentRoomData || currentRoomData.ownerId !== myId) return;
+  const name = document.getElementById('rs-room-name').value.trim();
+  if (!name) return;
+  currentRoomData.name = name;
+  myRooms.set(currentRoom, { ...myRooms.get(currentRoom), name });
+  saveRoomsToStorage();
+  document.getElementById('ch-name').textContent = name;
+  publishRoom(currentRoom, 'rename', { name });
+  showToast('Room renamed!', 'success');
+  closeModal('room-settings-modal');
+  renderSavedRooms();
+}
+
+function regenKey() {
+  if (!currentRoomData || currentRoomData.ownerId !== myId) return;
+  const newKey = `KEY-${Math.random().toString(36).substr(2,4).toUpperCase()}-${Math.random().toString(36).substr(2,4).toUpperCase()}`;
+  currentRoomData.key = newKey;
+  myRooms.set(currentRoom, { ...myRooms.get(currentRoom), key: newKey });
+  saveRoomsToStorage();
+  document.getElementById('rs-room-key').textContent = newKey;
+  showToast('New key generated!', 'success');
+}
+
+function toggleLock() {
+  if (!currentRoomData || currentRoomData.ownerId !== myId) return;
+  const locked = !currentRoomData.locked;
+  currentRoomData.locked = locked;
+  myRooms.set(currentRoom, { ...myRooms.get(currentRoom), locked });
+  saveRoomsToStorage();
+  document.getElementById('rs-lock-btn').textContent = locked ? '🔓 Unlock Room' : '🔒 Lock Room';
+  publishRoom(currentRoom, 'lock', { locked });
+  showToast(locked ? 'Room locked' : 'Room unlocked', 'info');
+}
+
+function deleteRoom() {
+  if (!confirm('Delete this room? All messages will be lost.')) return;
+  publishRoom(currentRoom, 'deleted', {});
+  leaveRoomLocally(currentRoom);
+  closeModal('room-settings-modal');
+  switchToPublic();
+  showToast('Room deleted', 'info');
+}
+
+function kickUser(targetId) {
+  publishRoom(currentRoom, 'kick', { targetId });
+  // Update members list
+  updateRoomMembers(currentRoom);
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────
+function saveSettings() {
+  const newName = document.getElementById('settings-username').value.trim() || myUsername;
+  const newAvatar = document.getElementById('settings-avatar').value.trim() || myAvatar;
+  myUsername = newName;
+  myAvatar = newAvatar;
+  localStorage.setItem('kc_username', myUsername);
+  localStorage.setItem('kc_avatar', myAvatar);
+  updateSidebarUser();
+  updatePresenceData();
+  closeModal('settings-modal');
+  showToast('Settings saved!', 'success');
+}
+
+// ── Search ────────────────────────────────────────────────────────────────
+function toggleSearch() {
+  const bar = document.getElementById('search-bar');
+  bar.classList.toggle('show');
+  if (bar.classList.contains('show')) document.getElementById('search-input').focus();
+  else { document.getElementById('search-input').value = ''; searchMessages(''); }
+}
+
+function searchMessages(query) {
+  if (!query) { renderMessages(currentRoom); return; }
+  const q = query.toLowerCase();
+  const filtered = (messages[currentRoom] || []).filter(m =>
+    m.text?.toLowerCase().includes(q) || m.username?.toLowerCase().includes(q)
+  );
+  const area = document.getElementById('messages-area');
+  area.innerHTML = '';
+  if (!filtered.length) {
+    area.innerHTML = '<div class="empty-state"><div class="es-icon">🔍</div><h3>No results</h3><p>Try different keywords.</p></div>';
+    return;
+  }
+  filtered.forEach(m => area.appendChild(buildMessageEl(currentRoom, m)));
+}
+
+// ── Members Panel ─────────────────────────────────────────────────────────
+function toggleMembers() {
+  document.getElementById('members-panel').classList.toggle('show');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+  const icons = { success: '✅', error: '❌', info: 'ℹ️' };
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span>${icons[type]}</span><span>${escHtml(msg)}</span>`;
+  document.getElementById('toast-container').appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────
+function toggleSidebar() { sidebarOpen = !sidebarOpen; document.getElementById('sidebar').classList.toggle('open', sidebarOpen); }
+function closeSidebar() { sidebarOpen = false; document.getElementById('sidebar').classList.remove('open'); }
+
+// ── Utilities ─────────────────────────────────────────────────────────────
+function scrollToBottom() {
+  const area = document.getElementById('messages-area');
+  area.scrollTop = area.scrollHeight;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function copyText(el) {
+  navigator.clipboard.writeText(el.textContent);
+  showToast('Copied!', 'success');
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/1024/1024).toFixed(1) + ' MB';
+}
+
+// ── Init UI ───────────────────────────────────────────────────────────────
+updateSidebarUser();
+document.getElementById('settings-username').value = myUsername;
+document.getElementById('settings-avatar').value = myAvatar;
+
+// Start
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "keychat-netlify",
+  "version": "2.0.0",
+  "description": "KeyChat — Anonymous Real-Time Messaging (Netlify Edition)",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'No build step required'"
+  },
+  "dependencies": {
+    "ably": "^1.2.48",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
+  }
+  
+}
