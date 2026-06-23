@@ -1012,9 +1012,13 @@ async function initAbly() {
     const statusEl = document.getElementById('connect-status-text');
     statusEl.textContent = 'Connecting…';
 
+    // Use key directly — works for client-side publish/subscribe
+    // Make sure your Ably key has: publish, subscribe, presence, history capabilities
     ablyClient = new Ably.Realtime({
       key: ABLY_API_KEY,
-      clientId: myId
+      clientId: myId,
+      echoMessages: false,        // don't receive own published messages back
+      recover: function(lastConnectionDetails, cb) { cb(true); } // auto-recover on reconnect
     });
 
     ablyClient.connection.on('connected', () => {
@@ -1035,6 +1039,11 @@ async function initAbly() {
 
     ablyClient.connection.on('disconnected', () => {
       document.getElementById('conn-badge').classList.add('connecting');
+    });
+
+    ablyClient.connection.on('connected', () => {
+      // Re-attach channels on reconnect (Ably auto-reattaches, but update badge)
+      document.getElementById('conn-badge').classList.remove('connecting', 'offline');
     });
 
     // Timeout after 8 seconds
@@ -1103,7 +1112,8 @@ function subscribePublicChannel() {
 }
 
 function subscribePresence() {
-  presenceChannel = ablyClient.channels.get('keychat:public');
+  // Reuse the same channel object — Ably SDK deduplicates by name
+  presenceChannel = publicChannel;
 
   presenceChannel.presence.subscribe('enter', updateOnlineUsers);
   presenceChannel.presence.subscribe('leave', updateOnlineUsers);
@@ -1113,7 +1123,7 @@ function subscribePresence() {
     username: myUsername,
     avatar: myAvatar,
     room: currentRoom
-  });
+  }, (err) => { if (err) console.warn('Presence enter error:', err); });
 }
 
 function updatePresenceData() {
@@ -1230,13 +1240,13 @@ function subscribeRoomChannel(roomId) {
 // ── Message Publishing ────────────────────────────────────────────────────
 function publishPublic(event, data) {
   if (!publicChannel) return;
-  publicChannel.publish(event, data);
+  publicChannel.publish(event, data, (err) => { if (err) console.error('Ably publish error:', err); });
 }
 
 function publishRoom(roomId, event, data) {
   const ch = roomChannels.get(roomId);
   if (!ch) return;
-  ch.publish(event, data);
+  ch.publish(event, data, (err) => { if (err) console.error('Ably publish error:', err); });
 }
 
 // ── Setup Flow ────────────────────────────────────────────────────────────
@@ -1624,6 +1634,11 @@ function sendMessage() {
   const text = input.value.trim();
   if (!text && !pendingFile) return;
 
+  if (!ablyClient || ablyClient.connection.state !== 'connected') {
+    showToast('Not connected — please wait or refresh', 'error');
+    return;
+  }
+
   const msg = {
     id: msgId(),
     userId: myId,
@@ -1642,12 +1657,17 @@ function sendMessage() {
     messages['public'].push(msg);
     if (messages['public'].length > 200) messages['public'].shift();
     appendMessage('public', msg);
-    publishPublic('msg', msg);
+    publicChannel.publish('msg', msg, (err) => {
+      if (err) { console.error('Publish error:', err); showToast('Send failed: ' + (err.message || err), 'error'); }
+    });
   } else {
     if (!messages[currentRoom]) messages[currentRoom] = [];
     messages[currentRoom].push(msg);
     appendMessage(currentRoom, msg);
-    publishRoom(currentRoom, 'msg', msg);
+    const ch = roomChannels.get(currentRoom);
+    if (ch) ch.publish('msg', msg, (err) => {
+      if (err) { console.error('Publish error:', err); showToast('Send failed: ' + (err.message || err), 'error'); }
+    });
   }
 
   input.value = '';
