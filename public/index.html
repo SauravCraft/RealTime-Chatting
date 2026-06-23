@@ -714,11 +714,7 @@ body {
 
 <!-- Main -->
 <div id="main">
-  <!-- Netlify setup alert (shown if ABLY not configured) -->
-  <div id="setup-alert">
-    ⚠️ <strong>Demo Mode</strong> — To enable real-time chat, add your <a href="https://ably.com" target="_blank">Ably API key</a> to Netlify environment variables. <a href="README.md" target="_blank">See setup guide</a>.
-    <button onclick="this.parentElement.classList.remove('show')" style="margin-left:auto;background:none;border:none;color:inherit;cursor:pointer;font-size:16px;">✕</button>
-  </div>
+  <!-- setup-alert removed — Ably key is configured directly -->
 
   <div id="chat-header">
     <button class="hamburger" onclick="toggleSidebar()">☰</button>
@@ -919,10 +915,8 @@ body {
 // ═══════════════════════════════════════════════════════════════════════
 
 // ── Config ──────────────────────────────────────────────────────────────
-// IMPORTANT: Set ABLY_API_KEY in Netlify environment variables
-// The frontend gets an auth token from the serverless function
-const ABLY_AUTH_URL = '/api/ably-auth';
-const ROOMS_API_URL = '/.netlify/functions/rooms';
+const ABLY_API_KEY = 'Lc0ODA.LdtzgQ:7N0DGhnkaWpJWIufXedJ_UdKG16qKrOxIVRa3xbmdmk';
+const ROOMS_API_URL = null; // No backend — rooms are managed locally
 
 // ── Emoji Data ──────────────────────────────────────────────────────────
 const EMOJI_CATS = {
@@ -995,9 +989,7 @@ async function boot() {
     await initAbly();
   } catch (err) {
     console.error('Ably connection failed:', err);
-    document.getElementById('setup-alert').classList.add('show');
     document.getElementById('connect-overlay').style.display = 'none';
-    // Run in local demo mode
     runDemoMode();
     return;
   }
@@ -1009,8 +1001,8 @@ async function boot() {
 }
 
 function runDemoMode() {
-  // Show UI in offline/demo mode
-  showToast('Running in demo mode — no Ably key configured', 'info');
+  // Fallback if Ably fails — still shows chat UI
+  showToast('Could not connect to Ably — check your network', 'error');
   if (isFirstVisit) showSetup();
 }
 
@@ -1018,10 +1010,10 @@ function runDemoMode() {
 async function initAbly() {
   return new Promise((resolve, reject) => {
     const statusEl = document.getElementById('connect-status-text');
-    statusEl.textContent = 'Authenticating…';
+    statusEl.textContent = 'Connecting…';
 
     ablyClient = new Ably.Realtime({
-      authUrl: `${ABLY_AUTH_URL}?clientId=${encodeURIComponent(myId)}`,
+      key: ABLY_API_KEY,
       clientId: myId
     });
 
@@ -1923,48 +1915,28 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
 });
 
 // ── Rooms ─────────────────────────────────────────────────────────────────
-async function createRoom() {
+function createRoom() {
   const name = document.getElementById('create-room-name').value.trim() || '';
   closeModal('create-room-modal');
 
-  try {
-    const res = await fetch(ROOMS_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create', name, ownerId: myId })
-    });
-    const data = await res.json();
-    if (data.error) return showToast(data.error, 'error');
+  // Fully local room creation — no server needed
+  const roomId = Math.random().toString(36).substr(2, 6);
+  const key = `KEY-${Math.random().toString(36).substr(2,4).toUpperCase()}-${Math.random().toString(36).substr(2,4).toUpperCase()}`;
+  const roomName = name || `Room ${roomId}`;
 
-    document.getElementById('rc-room-id').textContent = data.id;
-    document.getElementById('rc-room-key').textContent = data.key;
-    showModal('room-created-modal');
+  document.getElementById('rc-room-id').textContent = roomId;
+  document.getElementById('rc-room-key').textContent = key;
+  showModal('room-created-modal');
 
-    // Save room locally
-    myRooms.set(data.id, { name: data.name, key: data.key, ownerId: data.ownerId, locked: false });
-    saveRoomsToStorage();
-    renderSavedRooms();
+  myRooms.set(roomId, { name: roomName, key, ownerId: myId, locked: false });
+  saveRoomsToStorage();
+  renderSavedRooms();
+  enterRoom(roomId, myRooms.get(roomId));
 
-    enterRoom(data.id, myRooms.get(data.id));
-  } catch (e) {
-    // Fallback: create room locally (demo mode)
-    const roomId = Math.random().toString(36).substr(2, 6);
-    const key = `KEY-${Math.random().toString(36).substr(2,4).toUpperCase()}-${Math.random().toString(36).substr(2,4).toUpperCase()}`;
-    const roomName = name || `Room ${roomId}`;
-
-    document.getElementById('rc-room-id').textContent = roomId;
-    document.getElementById('rc-room-key').textContent = key;
-    showModal('room-created-modal');
-
-    myRooms.set(roomId, { name: roomName, key, ownerId: myId, locked: false });
-    saveRoomsToStorage();
-    renderSavedRooms();
-    enterRoom(roomId, myRooms.get(roomId));
-  }
   document.getElementById('create-room-name').value = '';
 }
 
-async function joinRoom() {
+function joinRoom() {
   const roomId = document.getElementById('join-room-id').value.trim().toLowerCase();
   const key = document.getElementById('join-room-key').value.trim();
   const errEl = document.getElementById('join-error');
@@ -1976,35 +1948,12 @@ async function joinRoom() {
     return;
   }
 
-  try {
-    const res = await fetch(ROOMS_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'validate', roomId, key, userId: myId })
-    });
-    const data = await res.json();
-
-    if (data.error) {
-      errEl.textContent = '🚫 ' + data.error;
-      errEl.style.display = 'block';
-      return;
-    }
-
-    closeModal('join-room-modal');
-    myRooms.set(roomId, { name: data.name || roomId, key, ownerId: data.ownerId, locked: data.locked || false });
-    saveRoomsToStorage();
-    renderSavedRooms();
-    enterRoom(roomId, myRooms.get(roomId));
-
-  } catch(e) {
-    // Demo mode: accept any key
-    showToast('Server validation unavailable — joining in demo mode', 'info');
-    closeModal('join-room-modal');
-    myRooms.set(roomId, { name: `Room ${roomId}`, key, ownerId: null, locked: false });
-    saveRoomsToStorage();
-    renderSavedRooms();
-    enterRoom(roomId, myRooms.get(roomId));
-  }
+  // Local join — key is trusted as-is (validated by room creator sharing it)
+  closeModal('join-room-modal');
+  myRooms.set(roomId, { name: `Room ${roomId}`, key, ownerId: null, locked: false });
+  saveRoomsToStorage();
+  renderSavedRooms();
+  enterRoom(roomId, myRooms.get(roomId));
 
   document.getElementById('join-room-id').value = '';
   document.getElementById('join-room-key').value = '';
